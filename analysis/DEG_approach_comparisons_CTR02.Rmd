@@ -29,7 +29,7 @@ theme_set(theme_Publication())
 ## [Data Import]{.underline}
 
 ```{r}
-data <- readRDS("processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_R_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
 ```
 
 Add some metadata columns
