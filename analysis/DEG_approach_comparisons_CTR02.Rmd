@@ -3,9 +3,11 @@ title: "Pseudobulk sgRNA GEX effects CTR02"
 author: "Eric Wang"
 date: "`r Sys.Date()`"
 output:
+  pdf_document:
+    toc: true
   html_notebook:
-    toc: yes
-    toc_float: yes
+    toc: true
+    toc_float: true
 ---
 
 ```{r setup, include=FALSE}
@@ -20,9 +22,11 @@ library(viridis)
 library(scales)
 library(DESeq2)
 knitr::opts_chunk$set(echo = TRUE)
+```
 
-source("../functions/scRNA_seq_analysis_functions.R")
-source("../functions/plotting_fxns.R")
+```{r}
+source("functions/scRNA_seq_analysis_functions.R")
+source("functions/plotting_fxns.R")
 theme_set(theme_Publication())
 ```
 
@@ -229,48 +233,47 @@ p4 <- resLFCTgfbr2Tidy %>%
 ```
 
 
-### Group Specific Pseudobulk
+## [Tissue and activation status adjustment]{.underline}
 
-Here, I will compare the DEG analysis of bulk sgRNA vs those separated by
-resting/activated and tissue
+Here, I will compare the DEG analysis results with and without accounting for cofactors in DESeq2 (e.g. tissue of origin and activation status)
 
 ```{r, results="hide"}
-# perform pseudobulk aggregation
-pseudodata1 <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("organ","feature_gene","feature_call"))
-pseudodata1 <- pseudodata1[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata1)),]
-pseudodata1$feature_gene <- gsub("NTC|NCC","control",pseudodata1$feature_gene) %>%
-  factor(c("control","Ifngr1","Tgfbr2"))
+pseudobulk <- function(x,covariates){
+  # perform pseudobulk aggregation
+  pseudodata1 <- AggregateExpression(x, assays = "SCT", return.seurat = T, group.by = covariates)
+  pseudodata1 <- pseudodata1[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata1)),]
+  pseudodata1$feature_gene <- gsub("NTC|NCC","control",pseudodata1$feature_gene) %>%
+    factor(c("control","Ifngr1","Tgfbr2"))
+  
+  return(pseudodata1)
+}
 
-# perform pseudobulk aggregation
-pseudodata2 <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("CD62L_status","feature_gene","feature_call"))
-pseudodata2 <- pseudodata2[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata2)),]
-pseudodata2$feature_gene <- gsub("NTC|NCC","control",pseudodata2$feature_gene) %>%
-  factor(c("control","Ifngr1","Tgfbr2"))
+pseudodata1 <- pseudobulk(data, c("organ","CD62L_status","feature_gene","feature_call"))
+pseudodata2 <- pseudobulk(data, c("organ","feature_gene","feature_call"))
+pseudodata3 <- pseudobulk(data, c("CD62L_status","feature_gene","feature_call"))
+pseudodata4 <- pseudobulk(data, c("feature_gene","feature_call"))
 
-pdOrgan <- vector(mode = "list")
-pdOrgan[["spleen"]] <- subset(pseudodata1, subset = organ == "spleen")
-pdOrgan[["mLN"]] <- subset(pseudodata1, subset = organ == "mLN")
-pdOrgan[["CD62Lpos"]] <- subset(pseudodata2, subset = CD62L_status == "CD62Lpos")
-pdOrgan[["CD62Lneg"]] <- subset(pseudodata2, subset = CD62L_status == "CD62Lneg")
-
-# find variable features for each subset
-pdOrgan <- lapply(pdOrgan, function(x) FindVariableFeatures(x, nfeature = 2000))
-
-# create DESeq2 object
-ddsOrgan <- lapply(pdOrgan, function(x) DESeqDataSetFromMatrix(x@assays$SCT$counts,
-                                                               colData = x@meta.data,
-                                                               design = ~ feature_gene))
+dds <- vector(mode = "list")
+dds[["organ_CD62L"]] <- DESeqDataSetFromMatrix(pseudodata1@assays$SCT$counts,
+                                                               colData = pseudodata1@meta.data,
+                                                               design = ~ organ + CD62L_status + feature_gene)
+dds[["organ"]] <- DESeqDataSetFromMatrix(pseudodata2@assays$SCT$counts,
+                                                               colData = pseudodata2@meta.data,
+                                                               design = ~ organ + feature_gene)
+dds[["CD62L"]] <- DESeqDataSetFromMatrix(pseudodata3@assays$SCT$counts,
+                                                               colData = pseudodata3@meta.data,
+                                                               design = ~ CD62L_status + feature_gene)
+dds[["none"]] <- DESeqDataSetFromMatrix(pseudodata4@assays$SCT$counts,
+                                                               colData = pseudodata4@meta.data,
+                                                               design = ~ feature_gene)
 
 # run DEseq analysis
-ddsOrgan <- lapply(ddsOrgan, function(x) DESeq(x))
-
-# add dds with pooled cells from above
-ddsOrgan[["all"]] <- dds
+dds <- lapply(dds, function(x) DESeq(x))
 ```
 
 First, we'll look at Ifngr1 KO DEGs
 
-```{r, fig.height=10, fig.width=12}
+```{r, fig.height=5, fig.width=12}
 # calculate DEGs for all conditions
 ifngr1DEG <- function(x){
   resLFC <- lfcShrink(x, contrast = c("feature_gene","Ifngr1","control"), type = "ashr")
@@ -279,7 +282,7 @@ ifngr1DEG <- function(x){
 }
 
 # create list of tibbles with DEG results
-resIfngr1 <- lapply(ddsOrgan, function(x) ifngr1DEG(x))
+resIfngr1 <- lapply(dds, function(x) ifngr1DEG(x))
 
 # Combine the tibbles into a single data frame with an identifier
 combinedTib <- bind_rows(
@@ -290,8 +293,8 @@ combinedTib <- bind_rows(
 )
 
 # Separate the first tibble for comparison
-referenceTib <- combinedTib %>% filter(tibble_id == "all")
-comparisonTib <- combinedTib %>% filter(tibble_id != "all")
+referenceTib <- combinedTib %>% filter(tibble_id == "none")
+comparisonTib <- combinedTib %>% filter(tibble_id != "none")
 
 # Merge the reference tibble with the comparison data
 comparisonTib1 <- comparisonTib %>%
@@ -299,11 +302,11 @@ comparisonTib1 <- comparisonTib %>%
   mutate(
     significance = case_when(
       padj_ref < 0.1 & padj < 0.1 ~ "both",
-      padj_ref < 0.1 ~ "pooled cells specific",
-      padj < 0.1 ~ "group specific",
-      TRUE ~ "none"
+      padj_ref < 0.1 ~ "no adjustment specific",
+      padj < 0.1 ~ "adjustment specific",
+      TRUE ~ "n.s."
     )) %>%
-  mutate(significance = factor(significance, c("none","pooled cells specific","group specific","both"))
+  mutate(significance = factor(significance, c("n.s.","no adjustment specific","adjustment specific","both"))
   )
 
 # Plotting
@@ -317,80 +320,12 @@ ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = s
   ylim(-3,3) +
   labs(
     title = "Comparison of shrunken Log2FC for Ifngr1 KO",
-    x = "log2FC (pooled cells)",
-    y = "log2FC (group)"
+    x = "log2FC no covariates",
+    y = "log2FC covariates"
   )
 ```
 
-```{r fig.height=6,fig.width=12}
-# Separate the first tibble for comparison
-referenceTib <- combinedTib %>% filter(tibble_id == "spleen")
-comparisonTib <- combinedTib %>% filter(tibble_id == "mLN")
-
-# Merge the reference tibble with the comparison data
-comparisonTib1 <- comparisonTib %>%
-  left_join(referenceTib, by = "genes", suffix = c("", "_ref")) %>%
-  mutate(
-    significance = case_when(
-      padj_ref < 0.1 & padj < 0.1 ~ "both",
-      padj_ref < 0.1 ~ "spleen",
-      padj < 0.1 ~ "mLN",
-      TRUE ~ "none"
-    )) %>%
-  mutate(significance = factor(significance, c("none","spleen","mLN","both"))
-  )
-write_csv(comparisonTib1,"analysis_outs/pseudobulk_ifngr1_spleen_mLN_DEG.csv")
-
-# Plotting
-p1 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = significance)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  scale_color_brewer(palette = "Dark2") +
-  theme(aspect.ratio = 1) +
-  xlim(-4,4) +
-  ylim(-4,4) +
-  labs(
-    title = "Ifngr1 KO spleen vs mLN",
-    x = "log2FC spleen",
-    y = "log2FC mLN"
-  )
-
-# Separate the first tibble for comparison
-referenceTib <- combinedTib %>% filter(tibble_id == "CD62Lpos")
-comparisonTib <- combinedTib %>% filter(tibble_id == "CD62Lneg")
-
-# Merge the reference tibble with the comparison data
-comparisonTib1 <- comparisonTib %>%
-  left_join(referenceTib, by = "genes", suffix = c("", "_ref")) %>%
-  mutate(
-    significance = case_when(
-      padj_ref < 0.1 & padj < 0.1 ~ "both",
-      padj_ref < 0.1 ~ "CD62Lpos",
-      padj < 0.1 ~ "CD62Lneg",
-      TRUE ~ "none"
-    )) %>%
-  mutate(significance = factor(significance, c("none","CD62Lneg","CD62Lpos","both"))
-  )
-write_csv(comparisonTib1,"analysis_outs/pseudobulk_ifngr1_CD62Lpos_neg_DEG.csv")
-
-# Plotting
-p2 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = significance)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  theme(aspect.ratio = 1) +
-  scale_color_brewer(palette = "Dark2") +
-  xlim(-4,4) +
-  ylim(-4,4) +
-  labs(
-    title = "Ifngr1 KO CD62L+ vs CD62L-",
-    x = "log2FC CD62L+",
-    y = "log2FC CD62L-"
-  )
-
-grid.arrange(p1,p2, ncol=2)
-```
-
-```{r, fig.height=10, fig.width=12}
+```{r, fig.height=5, fig.width=12}
 # calculate DEGs for all conditions
 tgfbr2DEG <- function(x){
   resLFC <- lfcShrink(x, contrast = c("feature_gene","Tgfbr2","control"), type = "ashr")
@@ -399,7 +334,7 @@ tgfbr2DEG <- function(x){
 }
 
 # create list of tibbles with DEG results
-resTgfbr2 <- lapply(ddsOrgan, function(x) tgfbr2DEG(x))
+resTgfbr2 <- lapply(dds, function(x) tgfbr2DEG(x))
 
 # Combine the tibbles into a single data frame with an identifier
 combinedTib <- bind_rows(
@@ -410,8 +345,8 @@ combinedTib <- bind_rows(
 )
 
 # Separate the first tibble for comparison
-referenceTib <- combinedTib %>% filter(tibble_id == "all")
-comparisonTib <- combinedTib %>% filter(tibble_id != "all")
+referenceTib <- combinedTib %>% filter(tibble_id == "none")
+comparisonTib <- combinedTib %>% filter(tibble_id != "none")
 
 # Merge the reference tibble with the comparison data
 comparisonTib2 <- comparisonTib %>%
@@ -419,11 +354,11 @@ comparisonTib2 <- comparisonTib %>%
   mutate(
     significance = case_when(
       padj_ref < 0.1 & padj < 0.1 ~ "both",
-      padj_ref < 0.1 ~ "pooled cells specific",
-      padj < 0.1 ~ "group specific",
-      TRUE ~ "none"
+      padj_ref < 0.1 ~ "no adjustment specific",
+      padj < 0.1 ~ "adjustment specific",
+      TRUE ~ "n.s."
     )) %>%
-  mutate(significance = factor(significance, c("none","pooled cells specific","group specific","both"))
+  mutate(significance = factor(significance, c("n.s.","no adjustment specific","adjustment specific","both"))
   )
 
 # Plotting
@@ -436,16 +371,73 @@ ggplot(comparisonTib2, aes(x = log2FoldChange_ref, y = log2FoldChange, color = s
   xlim(-3,3) +
   ylim(-3,3) +
   labs(
-    title = "Comparison of shrunken Log2FC for Ifngr1 KO",
-    x = "log2FC (pooled cells)",
-    y = "log2FC (group)"
+    title = "Comparison of shrunken Log2FC for Tgfbr2 KO",
+    x = "log2FC no covariates",
+    y = "log2FC covariates"
   )
 ```
 
-```{r fig.height=7,fig.width=12}
+## [TCR clonal removal]{.underline}
+
+Here, I will compare the DEG analysis results with and without accounting for cofactors in DESeq2 (e.g. tissue of origin and activation status)
+
+```{r, results="hide"}
+pseudobulk <- function(x,covariates){
+  # perform pseudobulk aggregation
+  pseudodata1 <- AggregateExpression(x, assays = "SCT", return.seurat = T, group.by = covariates)
+  pseudodata1 <- pseudodata1[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata1)),]
+  pseudodata1$feature_gene <- gsub("NTC|NCC","control",pseudodata1$feature_gene) %>%
+    factor(c("control","Ifngr1","Tgfbr2"))
+  
+  return(pseudodata1)
+}
+
+data2 <- subset(data, subset = clonalFrequency < 5)
+data3 <- subset(data, subset = clonalFrequency <= 1)
+
+pseudodata1 <- pseudobulk(data, c("organ","CD62L_status","feature_gene","feature_call"))
+pseudodata2 <- pseudobulk(data2, c("organ","CD62L_status","feature_gene","feature_call"))
+pseudodata3 <- pseudobulk(data2, c("organ","CD62L_status","feature_gene","feature_call"))
+
+dds <- vector(mode = "list")
+dds[["full"]] <- DESeqDataSetFromMatrix(pseudodata1@assays$SCT$counts,
+                                                               colData = pseudodata1@meta.data,
+                                                               design = ~ organ + CD62L_status + feature_gene)
+dds[["clone_remove_5"]] <- DESeqDataSetFromMatrix(pseudodata2@assays$SCT$counts,
+                                                               colData = pseudodata2@meta.data,
+                                                               design = ~ organ + CD62L_status + feature_gene)
+dds[["clone_remove_1"]] <- DESeqDataSetFromMatrix(pseudodata3@assays$SCT$counts,
+                                                               colData = pseudodata3@meta.data,
+                                                               design = ~ organ + CD62L_status + feature_gene)
+
+# run DEseq analysis
+dds <- lapply(dds, function(x) DESeq(x))
+```
+
+First, we'll look at Ifngr1 KO DEGs
+
+```{r, fig.height=5, fig.width=12}
+# calculate DEGs for all conditions
+ifngr1DEG <- function(x){
+  resLFC <- lfcShrink(x, contrast = c("feature_gene","Ifngr1","control"), type = "ashr")
+  resLFC <- resLFC %>%
+    as_tibble(rownames = "genes")
+}
+
+# create list of tibbles with DEG results
+resIfngr1 <- lapply(dds, function(x) ifngr1DEG(x))
+
+# Combine the tibbles into a single data frame with an identifier
+combinedTib <- bind_rows(
+  lapply(seq_along(resIfngr1), function(i) {
+    resIfngr1[[i]] %>%
+      mutate(tibble_id = names(resIfngr1)[i])
+  })
+)
+
 # Separate the first tibble for comparison
-referenceTib <- combinedTib %>% filter(tibble_id == "spleen")
-comparisonTib <- combinedTib %>% filter(tibble_id == "mLN")
+referenceTib <- combinedTib %>% filter(tibble_id == "full")
+comparisonTib <- combinedTib %>% filter(tibble_id != "full")
 
 # Merge the reference tibble with the comparison data
 comparisonTib1 <- comparisonTib %>%
@@ -453,57 +445,77 @@ comparisonTib1 <- comparisonTib %>%
   mutate(
     significance = case_when(
       padj_ref < 0.1 & padj < 0.1 ~ "both",
-      padj_ref < 0.1 ~ "spleen",
-      padj < 0.1 ~ "mLN",
-      TRUE ~ "none")) %>%
-  mutate(significance = factor(significance, c("none","spleen","mLN","both"))) 
-write_csv(comparisonTib1,"analysis_outs/pseudobulk_tgfbr2_spleen_mLN_DEG.csv")
-
-# Plotting
-p1 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = significance)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  scale_color_brewer(palette = "Dark2") +
-  theme(aspect.ratio = 1) +
-  xlim(-3,3) +
-  ylim(-3,3) +
-  labs(
-    title = "Ifngr1 KO spleen vs mLN",
-    x = "log2FC spleen",
-    y = "log2FC mLN"
-  )
-
-# Separate the first tibble for comparison
-referenceTib <- combinedTib %>% filter(tibble_id == "CD62Lpos")
-comparisonTib <- combinedTib %>% filter(tibble_id == "CD62Lneg")
-
-# Merge the reference tibble with the comparison data
-comparisonTib1 <- comparisonTib %>%
-  left_join(referenceTib, by = "genes", suffix = c("", "_ref")) %>%
-  mutate(
-    significance = case_when(
-      padj_ref < 0.1 & padj < 0.1 ~ "both",
-      padj_ref < 0.1 ~ "CD62Lpos",
-      padj < 0.1 ~ "CD62Lneg",
-      TRUE ~ "none"
+      padj_ref < 0.1 ~ "no adjustment specific",
+      padj < 0.1 ~ "adjustment specific",
+      TRUE ~ "n.s."
     )) %>%
-  mutate(significance = factor(significance, c("none","CD62Lneg","CD62Lpos","both"))
+  mutate(significance = factor(significance, c("n.s.","no adjustment specific","adjustment specific","both"))
   )
-write_csv(comparisonTib1,"analysis_outs/pseudobulk_ifngr1_CD62Lpos_neg_DEG.csv")
 
 # Plotting
-p2 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = significance)) +
+ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = significance)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~tibble_id) +
   theme(aspect.ratio = 1) +
   scale_color_brewer(palette = "Dark2") +
   xlim(-3,3) +
   ylim(-3,3) +
   labs(
-    title = "Ifngr1 KO CD62L+ vs CD62L-",
-    x = "log2FC CD62L+",
-    y = "log2FC CD62L-"
+    title = "Comparison of shrunken Log2FC for Ifngr1 KO",
+    x = "log2FC full",
+    y = "log2FC adjustment"
+  )
+```
+
+```{r, fig.height=5, fig.width=12}
+# calculate DEGs for all conditions
+tgfbr2DEG <- function(x){
+  resLFC <- lfcShrink(x, contrast = c("feature_gene","Tgfbr2","control"), type = "ashr")
+  resLFC <- resLFC %>%
+    as_tibble(rownames = "genes")
+}
+
+# create list of tibbles with DEG results
+resTgfbr2 <- lapply(dds, function(x) tgfbr2DEG(x))
+
+# Combine the tibbles into a single data frame with an identifier
+combinedTib <- bind_rows(
+  lapply(seq_along(resTgfbr2), function(i) {
+    resTgfbr2[[i]] %>%
+      mutate(tibble_id = names(resTgfbr2)[i])
+  })
+)
+
+# Separate the first tibble for comparison
+referenceTib <- combinedTib %>% filter(tibble_id == "full")
+comparisonTib <- combinedTib %>% filter(tibble_id != "full")
+
+# Merge the reference tibble with the comparison data
+comparisonTib2 <- comparisonTib %>%
+  left_join(referenceTib, by = "genes", suffix = c("", "_ref")) %>%
+  mutate(
+    significance = case_when(
+      padj_ref < 0.1 & padj < 0.1 ~ "both",
+      padj_ref < 0.1 ~ "no adjustment specific",
+      padj < 0.1 ~ "adjustment specific",
+      TRUE ~ "n.s."
+    )) %>%
+  mutate(significance = factor(significance, c("n.s.","no adjustment specific","adjustment specific","both"))
   )
 
-grid.arrange(p1,p2, ncol=2)
+# Plotting
+ggplot(comparisonTib2, aes(x = log2FoldChange_ref, y = log2FoldChange, color = significance)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~tibble_id) +
+  theme(aspect.ratio = 1) +
+  scale_color_brewer(palette = "Dark2") +
+  xlim(-3,3) +
+  ylim(-3,3) +
+  labs(
+    title = "Comparison of shrunken Log2FC for Tgfbr2 KO",
+    x = "log2FC full",
+    y = "log2FC adjustment")
 ```
+
