@@ -29,7 +29,7 @@ theme_set(theme_Publication())
 ## [Data Import]{.underline}
 
 ```{r}
-data <- readRDS("processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_10x_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
 ```
 
 Add some metadata columns
@@ -160,27 +160,72 @@ p4 <- ggplot(Tgfbr2Comp , aes(x = log2FoldChange, y = -log10(padj), color = unin
 ggsave("analysis_outs/perturb_ifngr1flox_comp_volcano.pdf")
 ```
 
-```{r}
-ifngr1Comp %>%
-  filter(padj < 0.1) %>%
-  ggplot(aes(y = infected_sig, fill = infected_sig)) +
-    geom_bar()
-```
-
-
-```{r}
-ifngr1CompDirect <- resLFCIfngr1Tidy %>%
-  left_join(infectedSig) %>%
+```{r, fig.height=10, fig.width=12}
+p1 <- resLFCIfngr1Tidy %>%
+  left_join(infectedDEG) %>%
   filter(padj < 0.1 | p_val_adj < 0.1) %>%
+  drop_na() %>%
   mutate(sig_category = case_when(padj < 0.1 & p_val_adj < 0.1 ~ "both",
                                   padj >= 0.1 & p_val_adj < 0.1 ~ "infected_only",
-                                  padj < 0.1 & p_val_adj >= 0.1 ~ "perturb_only",))
+                                  padj < 0.1 & p_val_adj >= 0.1 ~ "perturb_only",)) %>%
+  mutate(sig_category = factor(sig_category, c("both","perturb_only","infected_only"))) %>%
+  ggplot(aes(x = log2FoldChange, y = avg_log2FC, color = sig_category)) +
+    geom_point()+
+    scale_color_brewer(palette = "Dark2") +
+    xlim(-4,4) +
+    ylim(-4,4) +
+    theme(aspect.ratio = 1) +
+    ggtitle("Ifngr1 KO comparison")
 
-ggplot(ifngr1CompDirect, aes(x = log2FoldChange, y = avg_log2FC, color = sig_category)) +
-  geom_point()+
-  xlim(-4,4) +
-  ylim(-4,4) +
-  theme(aspect.ratio = 1)
+p2 <- resLFCIfngr1Tidy %>%
+  left_join(uninfectedDEG) %>%
+  filter(padj < 0.1 | p_val_adj < 0.1) %>%
+  drop_na() %>%
+  mutate(sig_category = case_when(padj < 0.1 & p_val_adj < 0.1 ~ "both",
+                                  padj >= 0.1 & p_val_adj < 0.1 ~ "uninfected_only",
+                                  padj < 0.1 & p_val_adj >= 0.1 ~ "perturb_only",)) %>%
+  mutate(sig_category = factor(sig_category, c("both","perturb_only","uninfected_only"))) %>%
+  ggplot(aes(x = log2FoldChange, y = avg_log2FC, color = sig_category)) +
+    geom_point()+
+    scale_color_brewer(palette = "Dark2") +
+    xlim(-4,4) +
+    ylim(-4,4) +
+    theme(aspect.ratio = 1) +
+    ggtitle("Ifngr1 KO comparison")
+
+p3 <- resLFCTgfbr2Tidy %>%
+  left_join(infectedDEG) %>%
+  filter(padj < 0.1 | p_val_adj < 0.1) %>%
+  drop_na() %>%
+  mutate(sig_category = case_when(padj < 0.1 & p_val_adj < 0.1 ~ "both",
+                                  padj >= 0.1 & p_val_adj < 0.1 ~ "infected_only",
+                                  padj < 0.1 & p_val_adj >= 0.1 ~ "perturb_only",)) %>%
+  mutate(sig_category = factor(sig_category, c("both","perturb_only","infected_only"))) %>%
+  ggplot(aes(x = log2FoldChange, y = avg_log2FC, color = sig_category)) +
+    geom_point()+
+    scale_color_brewer(palette = "Dark2") +
+    xlim(-4,4) +
+    ylim(-4,4) +
+    theme(aspect.ratio = 1) +
+    ggtitle("Tgfbr2 KO comparison")
+
+p4 <- resLFCTgfbr2Tidy %>%
+  left_join(infectedDEG) %>%
+  filter(padj < 0.1 | p_val_adj < 0.1) %>%
+  drop_na() %>%
+  mutate(sig_category = case_when(padj < 0.1 & p_val_adj < 0.1 ~ "both",
+                                  padj >= 0.1 & p_val_adj < 0.1 ~ "uninfected_only",
+                                  padj < 0.1 & p_val_adj >= 0.1 ~ "perturb_only",)) %>%
+  mutate(sig_category = factor(sig_category, c("both","perturb_only","uninfected_only"))) %>%
+  ggplot(aes(x = log2FoldChange, y = avg_log2FC, color = sig_category)) +
+    geom_point()+
+    scale_color_brewer(palette = "Dark2") +
+    xlim(-4,4) +
+    ylim(-4,4) +
+    theme(aspect.ratio = 1) +
+    ggtitle("Tgfbr2 KO comparison")
+
+(p1+p2)/(p3+p4)
 ```
 
 
