@@ -1,0 +1,414 @@
+---
+title: "TCR GEX effects CTR02"
+author: "Eric Wang"
+date: "`r Sys.Date()`"
+output:
+  html_notebook:
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+library(grid)
+library(pheatmap)
+library(viridis)
+library(scales)
+library(DESeq2)
+library(scRepertoire)
+library(ComplexHeatmap)
+library(circlize)
+library(RColorBrewer)
+library(UpSetR)
+knitr::opts_chunk$set(echo = TRUE)
+
+source("../functions/scRNA_seq_analysis_functions.R")
+source("../functions/plotting_fxns.R")
+theme_set(theme_Publication())
+```
+
+## [Data Import]{.underline}
+
+```{r}
+data <- readRDS("processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+```
+
+Add some metadata columns
+
+```{r}
+data <- subset(data, subset = num_features == 1)
+data$feature_gene <- gsub("\\..*","",data$feature_call)
+# split hash ID into separate organ and CD62L status
+hashSplit <- data@meta.data %>%
+  dplyr::select(hash.ID) %>%
+  separate(hash.ID,c("organ","CD62L_status"), sep = "-")
+data$organ <- hashSplit$organ
+data$CD62L_status <- hashSplit$CD62L_status
+data$organ_CD62L <- paste0(data$organ,"_",data$CD62L_status)
+```
+
+Add TCR data and change to show number of clones rather than proportion
+```{r}
+contigs <- read.csv("cellranger_outs/CTR02_GEX_CRISPR_HTO_VDJ/vdj_t/filtered_contig_annotations.csv")
+
+# combine TCR into clonotypes and filter cells with multiple of one chain
+# to only include highest expressing chain
+combined.TCR <- combineTCR(contigs, 
+                           removeNA = FALSE, 
+                           removeMulti = FALSE, 
+                           filterMulti = T)
+
+data <- combineExpression(combined.TCR, data, cloneCall = "strict", proportion = FALSE, cloneSize=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+```
+
+
+## [Clone Call Visualizations]{.underline}
+
+```{r}
+meta <- data@meta.data %>%
+  as_tibble(rownames = "barcode")
+
+combTCRTib <- vector(mode = "list")
+combTCRTib[[1]] <- meta
+```
+
+```{r, fig.height=10, fig.width=14}
+p1 <- meta %>%
+  drop_na() %>%
+  group_by(organ_CD62L, cloneSize) %>%
+  summarise(count = n()) %>%
+  mutate(total = sum(count)) %>%
+  mutate(freq = count/total) %>%
+  ggplot(aes(x = organ_CD62L, y = freq, fill = cloneSize)) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(expand = c(0,0)) +
+    scale_fill_viridis_d(direction = -1, option = "inferno") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    NoLegend()
+
+p2 <- meta %>%
+  drop_na() %>%
+  group_by(organ_CD62L, cloneSize) %>%
+  summarise(count = n()) %>%
+  mutate(total = sum(count)) %>%
+  mutate(freq = count/total) %>%
+  ggplot(aes(x = organ_CD62L, y = count, fill = cloneSize)) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(expand = c(0,0)) +
+    scale_fill_viridis_d(direction = -1, option = "inferno") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p3 <- meta %>%
+  drop_na() %>%
+  group_by(feature_call, cloneSize) %>%
+  summarise(count = n()) %>%
+  mutate(total = sum(count)) %>%
+  mutate(freq = count/total) %>%
+  ggplot(aes(x = feature_call, y = freq, fill = cloneSize)) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(expand = c(0,0)) +
+    scale_fill_viridis_d(direction = -1, option = "inferno") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    NoLegend()
+
+p4 <- meta %>%
+  drop_na() %>%
+  group_by(feature_call, cloneSize) %>%
+  summarise(count = n()) %>%
+  mutate(total = sum(count)) %>%
+  mutate(freq = count/total) %>%
+  ggplot(aes(x = feature_call, y = count, fill = cloneSize)) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(expand = c(0,0)) +
+    scale_fill_viridis_d(direction = -1, option = "inferno") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+(p1+p2)/(p3+p4)
+```
+
+```{r, fig.width=10, fig.height=5}
+p1 <- combTCRTib %>%
+  lapply(function(x) filter(x, feature_gene %in% c("NCC","NTC"))) %>%
+  clonalDiversity(group.by = "feature_call", metrics = "shannon") +
+    theme_Publication() +
+    NoLegend() +
+    ylim(5,7) +
+    ggtitle("Control") +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks = element_blank()) 
+
+p2 <- combTCRTib %>%
+  lapply(function(x) filter(x, feature_gene == "Ifngr1")) %>%
+  clonalDiversity(group.by = "feature_call", metrics = "shannon") +
+    theme_Publication() +
+    NoLegend() +
+    ylim(5,7) +
+    ggtitle("Ifngr1") +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks = element_blank())
+
+p3 <- combTCRTib %>%
+  lapply(function(x) filter(x, feature_gene == "Ifngr1")) %>%
+  clonalDiversity(group.by = "feature_call", metrics = "shannon") +
+    theme_Publication() +
+    NoLegend() +
+    ylim(5,7) +
+    ggtitle("Tgfbr2") +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks = element_blank())
+
+p1+p2+p3
+```
+
+### Clonal Overlap Guides
+
+Here, I will look at the overlap in clones between different guides. The main concern here is whether shared clones between guides could bias the transcriptional profile.
+
+```{r}
+# create TCR object split by sgRNA
+combTCRTibSplitGuide <- vector(mode = "list")
+sgrna <- unique(meta$feature_call)
+for(i in 1:length(sgrna)){
+  combTCRTibSplitGuide[[sgrna[i]]] <- meta %>%
+    filter(feature_call == sgrna[i])
+}
+
+# create TCR object split by organ_CD62L
+combTCRTibSplitOrgan <- vector(mode = "list")
+sgrna <- unique(meta$organ_CD62L)
+for(i in 1:length(sgrna)){
+  combTCRTibSplitOrgan[[sgrna[i]]] <- meta %>%
+    filter(organ_CD62L == sgrna[i])
+}
+```
+
+```{r, fig.height=7, fig.width=8}
+clonalOverlap(combTCRTibSplitGuide, method = "morisita", cloneCall = "strict") +
+  theme_Publication() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Calculate exact number of overlapping clones between sgRNA using the CTstrict
+
+```{r, fig.height=6, fig.width=7}
+# Matrix to store overlap counts
+overlap_matrix <- matrix(0, nrow = length(combTCRTibSplitGuide), ncol = length(combTCRTibSplitGuide))
+
+# Calculate overlaps between each pair of tibbles
+for (i in 1:length(combTCRTibSplitGuide)) {
+  for (j in 1:length(combTCRTibSplitGuide)) {
+    overlap_matrix[i, j] <- length(intersect(combTCRTibSplitGuide[[i]]$CTstrict, combTCRTibSplitGuide[[j]]$CTstrict))
+  }
+}
+
+# Convert overlap matrix to a data frame
+overlap_df <- as.data.frame(overlap_matrix)
+rownames(overlap_df) <- names(combTCRTibSplitGuide)
+colnames(overlap_df) <- names(combTCRTibSplitGuide)
+
+# create annotation df
+ddsCol <- data.frame(gene = gsub("\\..*","",rownames(overlap_df)),
+                     row.names = rownames(overlap_df))
+
+# Create the heatmap annotation with custom colors
+annotation_colors <- brewer.pal(n = length(unique(ddsCol$gene)), name = "Dark2")
+names(annotation_colors) <- unique(ddsCol$gene)
+ha <- HeatmapAnnotation(df = ddsCol$gene, col = list(df = annotation_colors))
+
+Heatmap(log10(overlap_df),
+        column_title = "Number of overlapping TCR clones",
+        name = "Log10(# of\nOverlapping\nClones)",
+        col = colorRamp2(seq(0, 4, length.out = 256), viridis(256, alpha = 1, option = "inferno")),
+        top_annotation = ha,
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          grid.text(overlap_df[i, j], x, y, gp = gpar(fontsize = 10, col = "white"))
+        })
+```
+
+```{r, fig.height=6, fig.width=7}
+# Matrix to store overlap counts
+overlap_matrix <- matrix(0, nrow = length(combTCRTibSplitGuide), ncol = length(combTCRTibSplitGuide))
+
+# Calculate overlaps as the number of cells in x that share a clonotype in y
+for (i in 1:length(combTCRTibSplitGuide)) {
+  for (j in 1:length(combTCRTibSplitGuide)) {
+    overlap_matrix[i,j] <- sum(combTCRTibSplitGuide[[i]]$CTstrict %in% combTCRTibSplitGuide[[j]]$CTstrict)/length(combTCRTibSplitGuide[[i]]$CTstrict)
+  }
+}
+
+# Convert overlap matrix to a data frame
+overlap_df <- as.data.frame(overlap_matrix)
+rownames(overlap_df) <- names(combTCRTibSplitGuide)
+colnames(overlap_df) <- names(combTCRTibSplitGuide)
+
+# create annotation df
+ddsCol <- data.frame(gene = gsub("\\..*","",rownames(overlap_df)),
+                     row.names = rownames(overlap_df))
+
+# Create the heatmap annotation with custom colors
+annotation_colors <- brewer.pal(n = length(unique(ddsCol$gene)), name = "Dark2")
+names(annotation_colors) <- unique(ddsCol$gene)
+ha <- HeatmapAnnotation(df = ddsCol$gene, col = list(df = annotation_colors))
+
+Heatmap(overlap_df,
+        column_title = "Freq of cells with overlapping TCR clonotypes",
+        name = "Freq of Cells\nShared TCR\nclonotypes\n(x in y)/sum(X)",
+        col = colorRamp2(seq(0, 1, length.out = 256), viridis(256, alpha = 1, option = "inferno")),
+        top_annotation = ha,
+        cluster_rows = F,
+        cluster_columns = F,
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          grid.text(round(overlap_df[i, j],2), x, y, gp = gpar(fontsize = 10, col = "white"))
+        })
+```
+
+```{r, fig.height=6, fig.width=10}
+# Convert each tibble to a named vector of clonotypes
+clonotype_list <- lapply(combTCRTibSplitGuide, function(x) x$CTstrict)
+
+# Create a binary matrix of clonotype presence/absence
+clonotype_df <- lapply(clonotype_list, function(clonotypes) {
+  sapply(unique(unlist(clonotype_list)), function(clono) as.integer(clono %in% clonotypes))
+})
+
+# Combine the individual matrices into one data frame
+clonotype_df <- do.call(cbind, clonotype_df)
+colnames(clonotype_df) <- names(combTCRTibSplitGuide)
+clonotype_df <- as.data.frame(clonotype_df)
+
+# Plot the upset plot
+p1 <- upset(clonotype_df, sets = colnames(clonotype_df), order.by = "freq",)
+print(p1, newpage = T)
+```
+
+### Clonal Overlap Organ CD62L
+
+```{r, fig.height=7, fig.width=8}
+clonalOverlap(combTCRTibSplitOrgan, method = "morisita", cloneCall = "strict") +
+  theme_Publication() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r, fig.height=6, fig.width=8}
+# Matrix to store overlap counts
+overlap_matrix <- matrix(0, nrow = length(combTCRTibSplitOrgan), ncol = length(combTCRTibSplitOrgan))
+
+# Calculate overlaps between each pair of tibbles
+for (i in 1:length(combTCRTibSplitOrgan)) {
+  for (j in 1:length(combTCRTibSplitOrgan)) {
+    overlap_matrix[i, j] <- length(intersect(combTCRTibSplitOrgan[[i]]$CTstrict, combTCRTibSplitOrgan[[j]]$CTstrict))
+  }
+}
+
+# Convert overlap matrix to a data frame
+overlap_df <- as.data.frame(overlap_matrix)
+rownames(overlap_df) <- names(combTCRTibSplitOrgan)
+colnames(overlap_df) <- names(combTCRTibSplitOrgan)
+
+# create annotation df
+ddsCol <- data.frame(gene = gsub("\\..*","",rownames(overlap_df)),
+                     row.names = rownames(overlap_df))
+
+# Create the heatmap annotation with custom colors
+annotation_colors <- brewer.pal(n = length(unique(ddsCol$gene)), name = "Dark2")
+names(annotation_colors) <- unique(ddsCol$gene)
+ha <- HeatmapAnnotation(df = ddsCol$gene, col = list(df = annotation_colors))
+
+Heatmap(log10(overlap_df),
+        column_title = "Number of overlapping TCR clones",
+        name = "Log10(# of\nOverlapping\nClones)",
+        col = colorRamp2(seq(0, 4, length.out = 256), viridis(256, alpha = 1, option = "inferno")),
+        top_annotation = ha,
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          grid.text(overlap_df[i, j], x, y, gp = gpar(fontsize = 10, col = "white"))
+        })
+```
+
+```{r, fig.height=6, fig.width=8}
+# Matrix to store overlap counts
+overlap_matrix <- matrix(0, nrow = length(combTCRTibSplitOrgan), ncol = length(combTCRTibSplitOrgan))
+
+# Calculate overlaps as the number of cells in x that share a clonotype in y
+for (i in 1:length(combTCRTibSplitOrgan)) {
+  for (j in 1:length(combTCRTibSplitOrgan)) {
+    overlap_matrix[i,j] <- sum(combTCRTibSplitOrgan[[i]]$CTstrict %in% combTCRTibSplitOrgan[[j]]$CTstrict)/length(combTCRTibSplitOrgan[[i]]$CTstrict)
+  }
+}
+
+# Convert overlap matrix to a data frame
+overlap_df <- as.data.frame(overlap_matrix)
+rownames(overlap_df) <- names(combTCRTibSplitOrgan)
+colnames(overlap_df) <- names(combTCRTibSplitOrgan)
+
+# create annotation df
+ddsCol <- data.frame(gene = gsub("\\..*","",rownames(overlap_df)),
+                     row.names = rownames(overlap_df))
+
+# Create the heatmap annotation with custom colors
+annotation_colors <- brewer.pal(n = length(unique(ddsCol$gene)), name = "Dark2")
+names(annotation_colors) <- unique(ddsCol$gene)
+ha <- HeatmapAnnotation(df = ddsCol$gene, col = list(df = annotation_colors))
+
+Heatmap(overlap_df,
+        column_title = "Freq of cells with overlapping TCR clonotypes",
+        name = "Freq of Cells\nShared TCR\nclonotypes\n(x in y)/sum(X)",
+        col = colorRamp2(seq(0, 1, length.out = 256), viridis(256, alpha = 1, option = "inferno")),
+        top_annotation = ha,
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          grid.text(round(overlap_df[i, j],2), x, y, gp = gpar(fontsize = 10, col = "white"))
+        })
+```
+
+```{r, fig.height=6, fig.width=10}
+# Convert each tibble to a named vector of clonotypes
+clonotype_list <- lapply(combTCRTibSplitOrgan, function(x) x$CTstrict)
+
+# Create a binary matrix of clonotype presence/absence
+clonotype_df <- lapply(clonotype_list, function(clonotypes) {
+  sapply(unique(unlist(clonotype_list)), function(clono) as.integer(clono %in% clonotypes))
+})
+
+# Combine the individual matrices into one data frame
+clonotype_df <- do.call(cbind, clonotype_df)
+colnames(clonotype_df) <- names(combTCRTibSplitOrgan)
+clonotype_df <- as.data.frame(clonotype_df)
+
+# Plot the upset plot
+p1 <- upset(clonotype_df, sets = colnames(clonotype_df), order.by = "freq",)
+print(p1, newpage = T)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

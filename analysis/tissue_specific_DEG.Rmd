@@ -1,0 +1,151 @@
+---
+title: "Tissue Specific sgRNA GEX effects CTR02"
+author: "Eric Wang"
+date: "`r Sys.Date()`"
+output:
+  html_notebook:
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+library(grid)
+library(pheatmap)
+library(viridis)
+library(patchwork)
+library(scales)
+library(DESeq2)
+knitr::opts_chunk$set(echo = TRUE)
+
+source("../functions/plotting_fxns.R")
+source("../functions/scRNA_seq_analysis_functions.R")
+theme_set(theme_Publication())
+```
+
+## [Data Import]{.underline}
+
+```{r}
+data <- readRDS("processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+```
+
+Replace metadata with mixscape processed data
+
+```{r}
+# filter data to only include cells with one guide
+data <- subset(data, subset = num_features == 1)
+# filter data to only include cells with one guide
+mixscapeMeta <- read.csv("analysis_outs/mixscape_classification_metadata.csv", row.names = 1)
+data@meta.data <- mixscapeMeta
+data$feature_gene_organ <- paste0(data$feature_gene,"_",data$organ)
+data$feature_gene_CD62L <- paste0(data$feature_gene,"_",data$CD62L_status)
+```
+
+Subset data to only include cells classifed as KO
+```{r}
+dataKO <- subset(data, mixscape_class.global %in% c("KO","control"))
+```
+
+## [Tissue Specific DEG Visualization]{.underline}
+
+Here I will use tissue specific DEGs identified by pseudobulk analysis and visualize them in the single cell data
+
+```{r}
+# perform pseudobulk aggregation
+pseudodata <- AggregateExpression(dataKO, assays = "SCT", return.seurat = T, group.by = c("organ","feature_call"))
+pseudodata <- pseudodata[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata)),]
+pseudodata <- FindVariableFeatures(pseudodata, nfeatures = 2000)
+varGenes <- VariableFeatures(pseudodata)
+
+# gather info for metadata
+# get UMIs per sgRNA
+# get frequency of single sgRNA integrations for individual sgRNA
+# get percent.mt
+metaData <- data@meta.data %>%
+  as_tibble(rownames = "cell_bc") %>%
+  group_by(organ,feature_gene,feature_call) %>%
+  summarise(freq_cells = n()/nrow(data@meta.data),
+            median_sgRNA_umi = median(as.numeric(num_umis)),
+            mito_perc = mean(percent.mt))
+
+# convert metadata to df form
+ddsColData <- metaData  %>%
+  mutate(organ_feature_call = paste0(organ,"_",feature_call)) %>%
+  mutate(feature_gene = gsub("\\.\\d+$","",feature_call)) %>%
+  mutate(feature_gene = gsub("NTC|NCC","control",feature_gene)) %>%
+  as.data.frame()
+rownames(ddsColData) <- ddsColData$organ_feature_call
+ddsColData <- ddsColData[colnames(pseudodata),]
+
+# create DESeq2 object
+dds <- DESeqDataSetFromMatrix(pseudodata@assays$SCT$counts,
+                              colData = ddsColData,
+                              design = ~ feature_gene)
+
+# perform VST normalization
+# essentially normalizes to library size while stabilizing variance for lowly expressed genes
+ddsNorm <- vst(dds)
+```
+
+```{r}
+goi <- c("Tagln2","Cxcl10","2410006H16Rik","Sat1","Wars","Cd7","Calhm6","Il18r1","Tnfsf11","Gpr83","Itga4","Litaf")
+
+spleen <- assay(ddsNorm)[,grep("spleen",colnames(ddsNorm))]
+spleen <- t(scale(t(spleen[goi,])))
+
+mLN <- assay(ddsNorm)[,grep("mLN",colnames(ddsNorm))]
+mLN <- t(scale(t(mLN[goi,])))
+
+test <- assay(ddsNorm)[goi,]
+test <- t(scale(t(test), center = T, scale = T))
+
+pheatmap(test, cluster_rows = F,cluster_cols = F)
+pheatmap(spleen, cluster_rows = F,cluster_cols = F)
+pheatmap(mLN, cluster_rows = F,cluster_cols = F)
+```
+
+
+
+
+```{r, fig.width=15, fig.height=10}
+VlnPlot(dataKO, c("Ifngr2","Ccr5", "Slamf7","Wars","Il12rb1","Ctla2b"), group.by = "feature_gene_organ", assay = "RNA", ncol = 3)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

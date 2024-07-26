@@ -1,0 +1,430 @@
+---
+title: "sgRNA imbalance CTR02"
+author: "Eric Y. Wang"
+date: "`r Sys.Date()`"
+output:
+  html_notebook:
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+library(grid)
+library(pheatmap)
+library(viridis)
+library(scales)
+knitr::opts_chunk$set(echo = TRUE)
+
+source("../functions/scRNA_seq_analysis_functions.R")
+source("../functions/plotting_fxns.R")
+theme_set(theme_Publication())
+```
+
+## [Goal]{.underline}
+
+Here, I want to assess the distribution of CRISPR detection in comparison to
+CTR01. I will also assess differences between CD62L+ and CD62L- populations and
+across organs
+
+## [Data Import]{.underline}
+
+```{r}
+data <- readRDS("processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+```
+
+## [CRISPR projection]{.underline}
+
+### CRISPR call histograms
+
+I have used a manual UMI cutoff of 9 to call guides based on the histograms
+presented below.
+
+```{r, fig.height=20, fig.width=20}
+# create separate df of counts
+bcCounts <- data@assays$CRISPR@counts
+
+# create list of plots
+histoPlots <- vector(mode = "list")
+for(i in 1:nrow(bcCounts)){
+  histoPlots[[i]] <- histo_piecewise(bcCounts[i,]) +
+    ggtitle(paste(rownames(bcCounts)[i]))
+}
+
+grid.arrange(grobs = histoPlots, ncol = 3)
+```
+
+```{r}
+histo_piecewise(bcCounts["Tgfbr2.3",]) +
+  ggtitle("Tgfbr2.3 sgRNA UMIs") +
+  scale_y_continuous(expand = c(0,0)) +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("analysis_outs/sgRNA_umi_tgfbr23.pdf")
+```
+
+
+### Feature Categorical Distribution
+
+First, let's take a look at how CRISPR calls project onto the cluster to confirm
+what we saw previously.
+
+```{r, fig.width=9, fig.height=8}
+dat <- data.frame(data@meta.data) %>%
+  mutate(num_features_cat = factor(num_features_cat, c("none","single","double","multiple")))
+dat$UMAP1 <- Embeddings(data, "umap")[,1]
+dat$UMAP2 <- Embeddings(data, "umap")[,2]
+
+#Create a data frame that doesn't contain a "num_features_cat" column. This will allow us to facet the density layer without affecting the points
+dat_bg <- dat[,-(which(colnames(dat)=="num_features_cat"))]
+
+density_plot <- ggplot(dat, aes(x=UMAP1, y=UMAP2)) +
+  stat_density_2d(geom="raster", aes(fill=stat(ndensity)), contour=F) + #ndensity calculates the normalized density for each num_features_cat--otherwise density would be affected by the number of cells for each num_features_cat, which is variable
+  geom_point(data=dat_bg, shape=16, size=0.1, alpha=0.2, color="white") +
+  # scale_fill_gradientn(colours=viridisLite::mako(100), name="Density") +
+  scale_fill_viridis_c() +
+  scale_x_continuous(expand=c(0,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  facet_wrap(~num_features_cat, ncol=2) +
+  theme(aspect.ratio = 1,
+        strip.background = element_blank(),
+        strip.text = element_text(size=12, color="black"),
+        axis.text=element_blank(),
+        axis.title=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line = element_blank(),
+        plot.background = element_rect(fill = "transparent", color = NA),
+        legend.text=element_text(size=12, color="black"),
+        legend.title=element_text(size=14, color="black"))
+
+density_plot +
+  ggtitle("Density of cells normalized across features_cat")
+```
+
+```{r, fig.height=6, fig.width=7}
+DimPlot(data, pt.size = 0.5) +
+  theme(aspect.ratio=1)
+```
+
+The density plot is a bit misleading as it is scaled across each category.
+
+```{r, fig.height=5, fig.width=9}
+clusterFeatureCat <- data@meta.data %>%
+  group_by(num_features_cat) %>%
+  summarise(feature_counts = n()) %>%
+  mutate(total = sum(feature_counts)) %>%
+  ungroup() %>%
+  mutate(feature_perc = feature_counts/total*100) %>%
+  mutate(sgRNA_detected = ifelse(num_features_cat == "none","no","yes")) %>%
+  mutate(num_features_cat = factor(num_features_cat, c("none","single","double","multiple")))
+
+p1 <- ggplot(clusterFeatureCat, aes(x = "", y = feature_perc, fill = num_features_cat)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous(expand = c(0,0)) +
+  ggtitle("Guide detection calls\nin total cells")
+
+p2 <- ggplot(clusterFeatureCat, aes(x = "", y = feature_perc, fill = sgRNA_detected)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous(expand = c(0,0)) +
+  ggtitle("Guide detection calls\nin total cells")
+
+p1+p2
+ggsave("analysis_outs/guide_detection_bulk.pdf")
+```
+
+```{r}
+clusterFeatureCat <- data@meta.data %>%
+  select(seurat_clusters,num_features_cat) %>%
+  group_by(seurat_clusters, num_features_cat) %>%
+  summarise(feature_counts = n()) %>%
+  mutate(total = sum(feature_counts)) %>%
+  ungroup() %>%
+  mutate(feature_perc = feature_counts/total*100) %>%
+  mutate(num_features_cat = factor(num_features_cat, c("none","single","double","multiple")))
+
+
+ggplot(clusterFeatureCat, aes(x = seurat_clusters, y = feature_perc, fill = num_features_cat)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_fill_brewer(palette = "Dark2") +
+  ggtitle("Guide detection calls in clusters")
+```
+
+There's a *slight enrichment of cells with no features detected in clusters 2,8,
+and 13 with a large enrichment in cluster 12*, but overall the number of cells
+with no sgRNA detected is much lower in CTR02 compared to CTR01. Let's see if it
+correlates with anything:
+
+```{r, fig.height=10, fig.width=10}
+clusterFeatureCat <- data@meta.data %>%
+  select(seurat_clusters,HTO_classification) %>%
+  group_by(seurat_clusters, HTO_classification) %>%
+  summarise(feature_counts = n()) %>%
+  mutate(total = sum(feature_counts)) %>%
+  ungroup() %>%
+  mutate(feature_perc = feature_counts/total*100)
+
+ggplot(clusterFeatureCat, aes(x = HTO_classification, y = feature_perc, fill = HTO_classification)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~seurat_clusters) +
+  ylab("percent of each cluster") +
+  ggtitle("Tissue and CD62L status by cluster") +
+  theme(axis.text.x = element_blank())
+```
+
+```{r, fig.width=8, fig.height=6}
+clusterFeatureCat <- data@meta.data %>%
+  select(num_features_cat, HTO_classification) %>%
+  group_by(num_features_cat, HTO_classification) %>%
+  summarise(feature_counts = n()) %>%
+  mutate(total = sum(feature_counts)) %>%
+  ungroup() %>%
+  mutate(feature_perc = feature_counts/total*100) %>%
+  mutate(num_features_cat = factor(num_features_cat, c("none","single","double","multiple")))
+
+ggplot(clusterFeatureCat, aes(x = num_features_cat, y = feature_perc, fill = HTO_classification)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~HTO_classification) +
+  ylab("percent of num_features_cat") +
+  ggtitle("Tissue and CD62L status by CRISPR detection category")
+```
+
+```{r}
+data$num_features_cat <- factor(data$num_features_cat, c("none","single","double","multiple"))
+VlnPlot(data,"pSL21-VEX", group.by = "num_features_cat", assay = "RNA", layer = "data", pt.size = 0) +
+  ggtitle("pSL21-VEX expression by CRISPR detection")
+```
+
+```{r}
+data$num_features_cat <- factor(data$num_features_cat, c("none","single","double","multiple"))
+VlnPlot(data,"CD49d", group.by = "num_features_cat", assay = "CITE", layer = "data", pt.size = 0) +
+  ggtitle("CD49d-ADT expression by CRISPR detection")
+```
+
+### No Feature Inflated
+
+I will make a separate metadata column to identify which columns are
+"no_feature_inflated".
+
+```{r}
+data[["no_feature_inflated"]] <- ifelse(data$seurat_clusters %in% c("2","8","12","13"), "no_inflated","normal")
+```
+
+```{r}
+data[["inflated_feature_cat"]] <- paste0(data$no_feature_inflated,"_",data$num_features_cat) %>%
+  factor(c("normal_none","normal_single","normal_double","normal_multiple","no_inflated_none","no_inflated_single","no_inflated_double","no_inflated_multiple"))
+data[["num_features_cat"]] <- factor(data$num_features_cat, c("none","single","double","multiple"))
+
+data@meta.data %>%
+  group_by(inflated_feature_cat) %>%
+  summarise(cell_num = n())
+
+data@meta.data %>%
+  group_by(no_feature_inflated) %>%
+  summarise(cell_num = n())
+```
+
+```{r}
+DimPlot(data, group.by = "no_feature_inflated") + theme(aspect.ratio = 1)
+DimPlot(data, group.by = "inflated_feature_cat") + theme(aspect.ratio = 1)
+```
+
+## [QC metric projection]{.underline}
+
+First, lets take a look at how different QC metrics project onto the clusters
+
+```{r, fig.height=16, fig.width=12}
+data[["log10nCount_CRISPR"]] <- log10(data$nCount_CRISPR + 0.001)
+
+VlnPlot(data, c("log10GenesPerUMI","log10nFeature_RNA","log10nCount_RNA","percent.mt","percent.ribo","nFeature_CRISPR","log10nCount_CRISPR"), ncol = 2, pt.size = 0)
+```
+
+```{r, fig.height=10, fig.width=10}
+VlnPlot(data, c("log10GenesPerUMI","log10nFeature_RNA","log10nCount_RNA","percent.mt","percent.ribo","log10nCount_CRISPR","nFeature_CRISPR"), group.by = "no_feature_inflated", ncol = 3, pt.size = 0)
+```
+
+```{r, fig.height=10, fig.width=10}
+VlnPlot(data, c("log10GenesPerUMI","log10nFeature_RNA","log10nCount_RNA","percent.mt","percent.ribo","log10nCount_CRISPR","nFeature_CRISPR"), group.by = "num_features_cat", ncol = 3, pt.size = 0)
+```
+
+## [PCA analysis of no_feature_inflated cells]{.underline}
+
+```{r}
+dataRNA <- data
+DefaultAssay(dataRNA) <- "RNA"
+
+# perform PCA on RNA data
+dataRNA <- NormalizeData(dataRNA)
+dataRNA <- FindVariableFeatures(dataRNA, 
+                     selection.method = "vst",
+                     nfeatures = 2000, 
+                     verbose = FALSE)
+dataRNA <- ScaleData(dataRNA, verbose = F)
+dataRNA <- RunPCA(dataRNA, verbose = F, npcs = 60)
+```
+
+```{r, fig.height=8, fig.width=16}
+p1 <- DimPlot(dataRNA, dims = c(1,2), reduction = "pca", split.by = "no_feature_inflated", pt.size = 0.7)
+p2 <- DimPlot(dataRNA, dims = c(2,3), reduction = "pca", split.by = "no_feature_inflated", pt.size = 0.7)
+p3 <- DimPlot(dataRNA, dims = c(3,4), reduction = "pca", split.by = "no_feature_inflated", pt.size = 0.7)
+p4 <- DimPlot(dataRNA, dims = c(4,5), reduction = "pca", split.by = "no_feature_inflated", pt.size = 0.7)
+
+grid.arrange(p1,p2,p3,p4, ncol = 2)
+```
+
+```{r, fig.height=4, fig.width=10}
+DimPlot(dataRNA, dims = c(1,2), reduction = "pca", split.by = "num_features_cat",
+        group.by = "no_feature_inflated",pt.size = 0.5,
+        ncol = 4) +
+  ggtitle("PC1 separated by sgRNA detection category")
+```
+
+Compared to CTR01, PC1 isn't as biased towards guide detection. There is some
+separation along PC1 for sgRNA detection, but it's nowhere near as striking as
+in CTR01. It appears like the no feature cells do mainly ocuppy positive PC1
+though.
+
+### PCA loadings of no feature inflated cells
+
+Let's take a look at the specific genes that drive PC1.
+
+```{r, fig.height=15, fig.width=10}
+VizDimLoadings(dataRNA, dims = 1:2, reduction = "pca", nfeatures = 100, balanced = T)
+```
+
+```{r, fig.height=15, fig.width=10}
+pcaFeatures <- c(TopFeatures(dataRNA, balanced = T, nfeatures = 100)$negative,
+                 TopFeatures(dataRNA, balanced = T, nfeatures = 100)$positive)
+DoHeatmap(dataRNA, features = pcaFeatures)
+```
+
+The loadings of PC1 don't match CTR01. Also, PC1 is mostly driven by cluster 9,
+which isn't one that had worse guide detection.
+
+## [LDA Analysis]{.underline}
+
+I want to see if LDA analysis can more better identify features that distinguish
+cells with sgRNA detected vs those that don't have sgRNA detected
+
+```{r}
+library(MASS)
+library(matrixStats)
+```
+
+When I initially ran LDA analysis on the scale.data slot straight from seurat,
+it basically only pulled out genes that had like zero expression. To counteract
+this, I will basically recreate the seurat PCA workflow except limiting analysis
+to genes that are above a certain expression level (quantified by frequency zero
+counts in cells).
+
+```{r}
+# create tibble with frequency of zero expressing cells per gene
+zeroFreq <- tibble(genes = rownames(dataRNA),
+                   freq = rowSums(dataRNA@assays$RNA$counts == 0)/ncol(dataRNA))
+
+hist(zeroFreq$freq)
+```
+
+```{r}
+# cutoff lowly expressing genes
+decentGEX <- zeroFreq %>%
+  filter(freq < 0.8)
+
+# pull out data on high expression genes
+scaledData <- dataRNA@assays$RNA$data
+scaledData <- scaledData[rownames(scaledData) %in% decentGEX$genes,] %>%
+  as.data.frame()
+
+# limit df to top most variable genes
+scaledData <- scaledData[VariableFeatures(dataRNA) %in% rownames(scaledData),]
+
+# transpose and scale data
+# scale operates columnwise
+scaledData <- t(scaledData)
+scaledData <- scale(scaledData)
+
+# pull out labels for LDA analysis
+labels <- dataRNA$num_features_cat
+
+# run LDA analysis
+lda_result <- lda(scaledData, grouping = labels)
+```
+
+```{r}
+# generate values per cell of LDA results
+lda_values <- predict(lda_result)
+valueTib <- tibble(cell_bc = rownames(lda_values$x),
+                   num_features_cat = dataRNA$num_features_cat,
+                   LD1 = lda_values$x[,1],
+                   LD2 = lda_values$x[,2])
+
+ggplot(valueTib, aes(x = LD1, y = LD2, color = num_features_cat)) +
+  geom_point(size = 0.5) +
+  facet_wrap(~num_features_cat)
+```
+
+```{r, fig.height=15, fig.width=5}
+ldaLoadings <- lda_result$scaling %>%
+  as_tibble(rownames= "genes")
+write_csv(ldaLoadings,"analysis_outs/sgRNA_imbalance_num_features_cat_LDA_loadings.csv")
+
+# extract top and bottom 50 loadings
+loadingsTop50 <- ldaLoadings %>%
+  arrange(desc(LD1)) %>%
+  head(50)
+loadingsBot50 <- ldaLoadings %>%
+  arrange(LD1) %>%
+  head(50)
+
+bind_rows(loadingsBot50, loadingsTop50) %>%
+  ggplot(aes(x = LD1, y = reorder(genes, LD1))) +
+  geom_point() +
+  ggtitle("Top 50 positive and negative loadings LDA")
+```
+
+## [Surface Marker Identification]{.underline}
+
+Here, I'll just compare the expression of markers I looked at in CTR01
+
+**Surface markers T cell activation**
+
+```{r, fig.height=16, fig.width=12}
+VlnPlot(data, c("Cd44","Il2ra","Tnfrsf18","Sell","Jun","Bcl2","Bach2","Tox","Tigit","Icos","Cd5"), assay = "RNA", ncol = 3, group.by = "num_features_cat", alpha = 0.2)
+```
+
+**Surface markers based on LDA enriched in no feature inflated cells**
+
+```{r, fig.height=8, fig.width=12}
+VlnPlot(data, c("Ifnar1","Tgfbr1","Cd27","Il27ra","Lrig1","Il21r"), assay = "RNA", ncol = 3, group.by = "num_features_cat", alpha = 0.2)
+```
+
+**Surface markers based on LDA enriched normal cells**
+
+```{r, fig.height=8, fig.width=12}
+VlnPlot(data, c("Malat1","Ltb","Cxcr3","Itgb1","Btla"), assay = "RNA", ncol = 3, group.by = "num_features_cat", alpha = 0.2)
+```
+
+**Surface markers based on PCA enriched in normal cells**
+
+```{r, fig.height=16, fig.width=12}
+VlnPlot(data, c("Cd52","Thy1","Tnfrsf18","Itga4","Igf1r","Tnfsf8","Il31ra","Acvr1c","Itgb8","Ntrk3","Tgfbr3","Tnfsf11"), assay = "RNA", ncol = 3, group.by = "num_features_cat", alpha = 0.2)
+```
+
+**Surface markers based on PCA enriched in no feature enriched cells**
+
+```{r, fig.height=16, fig.width=12}
+VlnPlot(data, c("Tmem256","Tigit","Tnfrsf4","Cxcr3","S1pr4","Cd7","Icos","Cd74","Tnfrsf9","Ccr2","Klrg1"), assay = "RNA", ncol = 3, group.by = "num_features_cat", alpha = 0.2)
+```
+
+**Surface markers based on DEG enriched in no feature enriched cells**
+
+```{r}
+VlnPlot(data, c("Celsr1","Tgfbr2"), assay = "RNA", ncol = 3, group.by = "num_features_cat", alpha=0.2)
+```
