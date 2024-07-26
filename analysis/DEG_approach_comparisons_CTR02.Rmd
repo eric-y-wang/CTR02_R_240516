@@ -29,7 +29,15 @@ theme_set(theme_Publication())
 ## [Data Import]{.underline}
 
 ```{r}
+<<<<<<< HEAD
 data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_10x_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+=======
+<<<<<<< HEAD
+data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_10x_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+=======
+data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_R_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+>>>>>>> bc369c7601367bc7a73eeb824675bb3bac0cde64
+>>>>>>> bb168e8473b924f7f451cf42e9fbbd9890d405ea
 ```
 
 Add some metadata columns
