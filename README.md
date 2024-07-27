@@ -2,4 +2,4 @@
 
 Data analysis for CTR02
 
-5' scRNA-seq + CRISPR + VDJ on micropool transduced Tregs
+5' GEM-X scRNA-seq + CRISPR + VDJ + HTO on micropool transduced Tregs
