@@ -104,13 +104,13 @@ Heatmap(regulonActivity_byCellType_Scaled, name="Regulon activity",
                        row_names_gp=grid::gpar(fontsize=6))
 ```
 
-```{r, fig.height=5, fig.width=7}
+```{r, fig.height=5, fig.width=6}
 regulonSubset <- c("Stat1(+)","Stat2(+)","Stat3(+)","Stat4(+)","Stat5a(+)","Stat6(+)",
                    "Smad1(+)","Smad3(+)","Smad4(+)","Smad5(+)","Smad7(+)")
 
 regulonActivity_byCellType_Scaled_subset <- regulonActivity_byCellType_Scaled[regulonSubset,]
 
-Heatmap(regulonActivity_byCellType_Scaled_subset, name="Regulon activity",
+Heatmap(regulonActivity_byCellType_Scaled_subset, name="Scaled\nRegulon\nActivity",
                        row_names_gp=grid::gpar(fontsize=6))
 ```
 
