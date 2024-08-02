@@ -1,51 +1,41 @@
----
-title: "Pseudobulk TCR Clone remove sgRNA GEX effects CTR02"
-author: "Eric Wang"
-date: "`r Sys.Date()`"
-output:
-  github_document:
-    toc: true
-    html_preview: true
-  html_notebook:
-    toc: yes
-    toc_float: yes
----
+Pseudobulk TCR Clone remove sgRNA GEX effects CTR02
+================
+Eric Wang
+2024-08-02
 
-```{r setup, include=FALSE}
-library(tidyverse)
-library(Seurat)
-library(ggplot2)
-library(ggrepel)
-library(gridExtra)
-library(grid)
-library(pheatmap)
-library(viridis)
-library(scales)
-library(DESeq2)
-knitr::opts_chunk$set(echo = TRUE)
-```
+- [Goal\]](#goal)
+- [<u>Data Import</u>](#data-import)
+- [<u>Examine sgRNA distributions</u>](#examine-sgrna-distributions)
+- [<u>Psuedobulk by sgRNA</u>](#psuedobulk-by-sgrna)
+  - [Correlation Matrices](#correlation-matrices)
+- [<u>Psuedobulk by Hash.ID + target
+  gene</u>](#psuedobulk-by-hashid--target-gene)
+  - [Correlation Matrices](#correlation-matrices-1)
+- [<u>Psuedobulk by Organ or by CD62L
+  status</u>](#psuedobulk-by-organ-or-by-cd62l-status)
+  - [Correlation Matrices](#correlation-matrices-2)
+- [<u>DEG analysis</u>](#deg-analysis)
 
-```{r}
+``` r
 source("functions/scRNA_seq_analysis_functions.R")
 source("functions/plotting_fxns.R")
 theme_set(theme_Publication())
 ```
 
+## Goal\]
 
-## Goal] {.underline}
+Here, I want to look at whether the DEGs change when I remove expanded
+TCR clonotypes
 
-Here, I want to look at whether the DEGs change when I remove expanded TCR
-clonotypes
+## <u>Data Import</u>
 
-## [Data Import]{.underline}
-
-```{r}
+``` r
 data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_10x_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
 ```
 
 Add some metadata columns
 
-```{r}
+``` r
 data <- subset(data, subset = num_features == 1)
 data$feature_gene <- gsub("\\..*","",data$feature_call)
 # split hash ID into separate organ and CD62L status
@@ -56,15 +46,18 @@ data$organ <- hashSplit$organ
 data$CD62L_status <- hashSplit$CD62L_status
 ```
 
-remove cells containing TCR clones that are shared across more than 5 cells
+remove cells containing TCR clones that are shared across more than 5
+cells
 
-```{r}
+``` r
 data <- subset(data, subset = clonalFrequency < 5)
 ```
 
-## [Examine sgRNA distributions]{.underline}
+    ## Warning: Removing 1464 cells missing data for vars requested
 
-```{r, fig.width=8, fig.height=12}
+## <u>Examine sgRNA distributions</u>
+
+``` r
 p1 <- data@meta.data %>%
   group_by(feature_call) %>%
   summarise(count = n()) %>%
@@ -79,7 +72,12 @@ p2 <- data@meta.data %>%
     geom_bar(stat = "identity") +
     facet_wrap(~organ) +
     scale_fill_brewer(palette = "Dark2")
+```
 
+    ## `summarise()` has grouped output by 'organ'. You can override using the
+    ## `.groups` argument.
+
+``` r
 p3 <- data@meta.data %>%
   group_by(CD62L_status,feature_gene) %>%
   summarise(count = n()) %>%
@@ -87,11 +85,18 @@ p3 <- data@meta.data %>%
     geom_bar(stat = "identity") +
     facet_wrap(~CD62L_status) +
     scale_fill_brewer(palette = "Dark2")
+```
 
+    ## `summarise()` has grouped output by 'CD62L_status'. You can override using the
+    ## `.groups` argument.
+
+``` r
 grid.arrange(p1,p2,p3)
 ```
 
-```{r, fig.height=6,fig.width=7}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+``` r
 data@meta.data %>%
   group_by(hash.ID,feature_gene) %>%
   summarise(count = n()) %>%
@@ -101,13 +106,28 @@ data@meta.data %>%
     scale_fill_brewer(palette = "Dark2")
 ```
 
-## [Psuedobulk by sgRNA]{.underline}
+    ## `summarise()` has grouped output by 'hash.ID'. You can override using the
+    ## `.groups` argument.
 
-```{r, results='hide'}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+## <u>Psuedobulk by sgRNA</u>
+
+``` r
 # perform pseudobulk aggregation
 pseudodata <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = "feature_call")
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata <- pseudodata[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata)),]
 pseudodata <- FindVariableFeatures(pseudodata, nfeatures = 2000)
+```
+
+    ## Finding variable features for layer counts
+
+``` r
 varGenes <- VariableFeatures(pseudodata)
 
 # gather info for metadata
@@ -132,36 +152,60 @@ rownames(ddsColData) <- ddsColData$feature_call
 dds <- DESeqDataSetFromMatrix(pseudodata@assays$SCT$counts,
                               colData = ddsColData,
                               design = ~ feature_gene)
+```
 
+    ## converting counts to integer mode
+
+    ## Warning in DESeqDataSet(se, design = design, ignoreRank): some variables in
+    ## design formula are characters, converting to factors
+
+``` r
 # perform VST normalization
 # essentially normalizes to library size while stabilizing variance for lowly expressed genes
 ddsNorm <- vst(dds)
 ```
 
-```{r, fig.height=5, fig.width=15}
+``` r
 p1 <- DESeq2::plotPCA(ddsNorm, intgroup = "feature_gene", ntop=2000) + theme(aspect.ratio = 1) +
   scale_color_brewer(palette = "Dark2") +
   ggtitle("Pseudobulk by Gene Target")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p2 <- DESeq2::plotPCA(ddsNorm, intgroup = "mito_perc", ntop=2000) +
   theme(aspect.ratio = 1) +
   scale_color_viridis() +
   ggtitle("Pseudobulk by Mito Percentage")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p3 <- DESeq2::plotPCA(ddsNorm, intgroup = "median_sgRNA_umi", ntop=2000) +
   theme(aspect.ratio = 1) +
   scale_color_viridis() +
   ggtitle("Pseudobulk by Median sgRNA UMI")
+```
 
+    ## using ntop=2000 top features by variance
+
+``` r
 grid.arrange(p1,p2,p3, ncol=3)
 ```
 
-*It's interesting that Ifngr1 KO cells have higher mitochondrial percentage.
-Also interesting that Tgfbr2 KO have higher median sgRNA UMI (perhaps because
-they are more proliferative?).* These could be features of the scRNA-seq dataset
-that are biologically relevant and "orthogonal" to DEG analysis alone.
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+
+*It’s interesting that Ifngr1 KO cells have higher mitochondrial
+percentage. Also interesting that Tgfbr2 KO have higher median sgRNA UMI
+(perhaps because they are more proliferative?).* These could be features
+of the scRNA-seq dataset that are biologically relevant and “orthogonal”
+to DEG analysis alone.
 
 ### Correlation Matrices
 
-```{r, fig.height=7, fig.width=9}
+``` r
 # Extract the normalized matrix from the object and compute pairwise correlation values
 dds_mat <- assay(ddsNorm)[varGenes,]
 dds_cor <- cor(dds_mat)
@@ -172,14 +216,18 @@ pheatmap(dds_cor, annotation = ddsColData[, c("mito_perc","median_sgRNA_umi"), d
          main = "Pearson Cor of Pseudobulked SCT counts\nTop 2000 Variable Genes")
 ```
 
-```{r, fig.height=15, fig.width=15}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+
+``` r
 pairs(dds_mat, upper.panel = NULL, main = "Correlogram VST Pseudobulked SCT Counts")
 ```
 
-Here I will look at the correlation between guides that are pseudobulked and
-then Zscored in comparison to the control guides (NCC and NTC)
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
-```{r, fig.height=7.5, fig.width=9}
+Here I will look at the correlation between guides that are pseudobulked
+and then Zscored in comparison to the control guides (NCC and NTC)
+
+``` r
 # Extract the normalized matrix from the object and compute pairwise correlation values
 dds_mat <- assay(ddsNorm)
 dds_mat <- dds_mat[varGenes,]
@@ -207,18 +255,32 @@ pheatmap(dds_cor, annotation = ddsColData[, c("mito_perc","feature_gene","freq_c
          main = "Pearson Cor of Z-scored (centered to control)\nPseudobulked SCT counts of Top 2000 Var Genes")
 ```
 
-```{r, fig.height=15, fig.width=15}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+``` r
 pairs(ddsZscore, upper.panel = NULL,
       main = "Correlogram VST Pseudobulked SCT Counts Z-scored (centered to control)")
 ```
 
-## [Psuedobulk by Hash.ID + target gene]{.underline}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
 
-```{r, results='hide'}
+## <u>Psuedobulk by Hash.ID + target gene</u>
+
+``` r
 # perform pseudobulk aggregation
 pseudodata <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("hash.ID","feature_gene"))
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata <- pseudodata[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata)),]
 pseudodata <- FindVariableFeatures(pseudodata, nfeatures = 2000)
+```
+
+    ## Finding variable features for layer counts
+
+``` r
 varGenes2 <- VariableFeatures(pseudodata)
 
 # gather info for metadata
@@ -232,7 +294,12 @@ metaData <- data@meta.data %>%
             median_sgRNA_umi = median(as.numeric(num_umis)),
             mito_perc = mean(percent.mt),
             mean_nCountRNA = mean(nCount_RNA))
+```
 
+    ## `summarise()` has grouped output by 'hash.ID', 'organ', 'CD62L_status'. You can
+    ## override using the `.groups` argument.
+
+``` r
 # convert metadata to df form
 ddsColData <- metaData  %>%
   mutate(sample_name = paste0(hash.ID,"_",feature_gene)) %>%
@@ -243,38 +310,76 @@ rownames(ddsColData) <- ddsColData$sample_name
 dds2 <- DESeqDataSetFromMatrix(pseudodata@assays$SCT$counts,
                               colData = ddsColData,
                               design = ~ organ + CD62L_status + feature_gene)
+```
 
+    ## converting counts to integer mode
+
+    ## Warning in DESeqDataSet(se, design = design, ignoreRank): some variables in
+    ## design formula are characters, converting to factors
+
+``` r
 # perform VST normalization
 # essentially normalizes to library size while stabilizing variance for lowly expressed genes
 ddsNorm2 <- vst(dds2)
 ```
 
-```{r, fig.height=10, fig.width=18}
+``` r
 p1 <- DESeq2::plotPCA(ddsNorm2, intgroup = "organ", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk by Organ")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p2 <- DESeq2::plotPCA(ddsNorm2, intgroup = "CD62L_status", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk by CD62L status")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p3 <- DESeq2::plotPCA(ddsNorm2, intgroup = "feature_gene", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk by sgRNA target")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p4 <- DESeq2::plotPCA(ddsNorm2, intgroup = "mito_perc", ntop=2000) +
   theme(aspect.ratio = 1) +
   scale_color_viridis() +
   ggtitle("Pseudobulk by Mean Mito Percentage")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p5 <- DESeq2::plotPCA(ddsNorm2, intgroup = "median_sgRNA_umi", ntop=2000) +
   theme(aspect.ratio = 1) +
   scale_color_viridis() +
   ggtitle("Pseudobulk by Median sgRNA UMI")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p6 <- DESeq2::plotPCA(ddsNorm2, intgroup = "median_sgRNA_umi", ntop=2000) +
   theme(aspect.ratio = 1) +
   scale_color_viridis() +
   ggtitle("Pseudobulk by Mean nCount RNA")
+```
 
+    ## using ntop=2000 top features by variance
+
+``` r
 grid.arrange(p1,p2,p3,p4,p5,p6, ncol=3)
 ```
 
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+
 ### Correlation Matrices
 
-```{r, fig.height=7, fig.width=9}
+``` r
 # Extract the normalized matrix from the object and compute pairwise correlation values
 dds_mat <- assay(ddsNorm2)[varGenes2,]
 dds_cor <- cor(dds_mat)
@@ -285,14 +390,18 @@ pheatmap(dds_cor, annotation = ddsColData[, c("organ","CD62L_status","feature_ge
          main = "Pearson Cor of Top 2000 Var Genes from Pseudobulked SCT counts")
 ```
 
-```{r, fig.height=15, fig.width=15}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+``` r
 pairs(dds_mat, upper.panel = NULL, main = "Correlogram VST Pseudobulked SCT Counts")
 ```
 
-Here I will look at the correlation between guides that are pseudobulked and
-then Zscored in comparison to the control guides (NCC and NTC)
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
 
-```{r, fig.height=7.5, fig.width=9}
+Here I will look at the correlation between guides that are pseudobulked
+and then Zscored in comparison to the control guides (NCC and NTC)
+
+``` r
 # Extract the normalized matrix from the object and compute pairwise correlation values
 dds_mat <- assay(ddsNorm2)
 dds_mat <- dds_mat[varGenes2,]
@@ -318,20 +427,34 @@ pheatmap(dds_cor, annotation = ddsColData[, c("organ","CD62L_status","feature_ge
          main = "Pearson Cor of Z-scored (centered to control)\nPseudobulked SCT counts of Top 2000 Var Genes")
 ```
 
-```{r, fig.height=15, fig.width=15}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+
+``` r
 pairs(ddsZscore, upper.panel = NULL,
       main = "Correlogram VST Pseudobulked SCT Counts Z-scored (centered to control)")
 ```
 
-## [Psuedobulk by Organ or by CD62L status]{.underline}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
-```{r, results='hide'}
+## <u>Psuedobulk by Organ or by CD62L status</u>
+
+``` r
 # perform pseudobulk aggregation
 pseudodata1 <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("organ","feature_gene","feature_call"))
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata1 <- pseudodata1[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata1)),]
 
 # perform pseudobulk aggregation
 pseudodata2 <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("CD62L_status","feature_gene","feature_call"))
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata2 <- pseudodata2[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata2)),]
 
 pdOrgan <- vector(mode = "list")
@@ -342,37 +465,87 @@ pdOrgan[["CD62Lneg"]] <- subset(pseudodata2, subset = CD62L_status == "CD62Lneg"
 
 # find variable features for each subset
 pdOrgan <- lapply(pdOrgan, function(x) FindVariableFeatures(x, nfeature = 2000))
+```
 
+    ## Finding variable features for layer counts
+
+    ## Finding variable features for layer counts
+    ## Finding variable features for layer counts
+    ## Finding variable features for layer counts
+
+``` r
 # create DESeq2 object
 ddsOrgan <- lapply(pdOrgan, function(x) DESeqDataSetFromMatrix(x@assays$SCT$counts,
                                                                colData = x@meta.data,
                                                                design = ~ feature_call))
+```
 
+    ## converting counts to integer mode
+
+    ## Warning in DESeqDataSet(se, design = design, ignoreRank): some variables in
+    ## design formula are characters, converting to factors
+
+    ## converting counts to integer mode
+
+    ## Warning in DESeqDataSet(se, design = design, ignoreRank): some variables in
+    ## design formula are characters, converting to factors
+
+    ## converting counts to integer mode
+
+    ## Warning in DESeqDataSet(se, design = design, ignoreRank): some variables in
+    ## design formula are characters, converting to factors
+
+    ## converting counts to integer mode
+
+    ## Warning in DESeqDataSet(se, design = design, ignoreRank): some variables in
+    ## design formula are characters, converting to factors
+
+``` r
 # perform VST normalization
 # essentially normalizes to library size while stabilizing variance for lowly expressed genes
 ddsOrganNorm <- lapply(ddsOrgan, function(x) vst(x))
 ```
 
-```{r, fig.height=10, fig.width=12}
+``` r
 p1 <- DESeq2::plotPCA(ddsOrganNorm$spleen, intgroup = "feature_gene", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk Spleen Only")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p2 <- DESeq2::plotPCA(ddsOrganNorm$mLN, intgroup = "feature_gene", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk mLN Only")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p3 <- DESeq2::plotPCA(ddsOrganNorm$CD62Lpos, intgroup = "feature_gene", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk CD62L+ Only")
+```
+
+    ## using ntop=2000 top features by variance
+
+``` r
 p4 <- DESeq2::plotPCA(ddsOrganNorm$CD62Lneg, intgroup = "feature_gene", ntop=2000) + theme(aspect.ratio = 1) +
   ggtitle("Pseudobulk CD62L- Only")
+```
 
+    ## using ntop=2000 top features by variance
 
+``` r
 grid.arrange(p1,p2,p3,p4, ncol=2)
 ```
 
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+
 ### Correlation Matrices
 
-Here I will look at the correlation between guides that are pseudobulked and
-then Zscored in comparison to the control guides (NCC and NTC)
+Here I will look at the correlation between guides that are pseudobulked
+and then Zscored in comparison to the control guides (NCC and NTC)
 
-```{r, fig.height=9, fig.width=9}
+``` r
 ZscoreCor <- function(x,y){
   # Extract the normalized matrix from the object and compute pairwise correlation values
   dds_mat <- assay(x)
@@ -405,37 +578,69 @@ for(i in 1:length(ddsOrganNorm)){
 pheatmap(ddsOrganCor[[1]],
           color = viridis(n = 256, alpha = 1, option = "inferno"), clustering_method = "single",
          main = "Pearson Cor of Z-scored (centered to control)\nPseudobulked SCT counts of Top 2000 Var Genes\nSpleen")
+```
+
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
+
+``` r
 pheatmap(ddsOrganCor[[2]],
           color = viridis(n = 256, alpha = 1, option = "inferno"), clustering_method = "single",
          main = "Pearson Cor of Z-scored (centered to control)\nPseudobulked SCT counts of Top 2000 Var Genes\nmLN")
+```
+
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-21-2.png)<!-- -->
+
+``` r
 pheatmap(ddsOrganCor[[3]],
           color = viridis(n = 256, alpha = 1, option = "inferno"), clustering_method = "single",
          main = "Pearson Cor of Z-scored (centered to control)\nPseudobulked SCT counts of Top 2000 Var Genes\nCD62L+")
+```
+
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-21-3.png)<!-- -->
+
+``` r
 pheatmap(ddsOrganCor[[1]],
           color = viridis(n = 256, alpha = 1, option = "inferno"), clustering_method = "single",
          main = "Pearson Cor of Z-scored (centered to control)\nPseudobulked SCT counts of Top 2000 Var Genes\nCD62L-")
 ```
 
-## [DEG analysis]{.underline}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-21-4.png)<!-- -->
 
-Here, I will compare the DEG analysis of bulk sgRNA vs those separated by
-resting/activated and tissue
+## <u>DEG analysis</u>
 
-```{r, results="hide"}
+Here, I will compare the DEG analysis of bulk sgRNA vs those separated
+by resting/activated and tissue
+
+``` r
 # perform pseudobulk aggregation
 pseudodata <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("feature_gene","feature_call"))
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata <- pseudodata[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata)),]
 pseudodata$feature_gene <- gsub("NTC|NCC","control",pseudodata$feature_gene) %>%
   factor(c("control","Ifngr1","Tgfbr2"))
 
 # perform pseudobulk aggregation
 pseudodata1 <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("organ","feature_gene","feature_call"))
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata1 <- pseudodata1[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata1)),]
 pseudodata1$feature_gene <- gsub("NTC|NCC","control",pseudodata1$feature_gene) %>%
   factor(c("control","Ifngr1","Tgfbr2"))
 
 # perform pseudobulk aggregation
 pseudodata2 <- AggregateExpression(data, assays = "SCT", return.seurat = T, group.by = c("CD62L_status","feature_gene","feature_call"))
+```
+
+    ## Centering and scaling data matrix
+
+``` r
 pseudodata2 <- pseudodata2[!grepl("^Tra[vdj]|^Trb[vdj]",rownames(pseudodata2)),]
 pseudodata2$feature_gene <- gsub("NTC|NCC","control",pseudodata2$feature_gene) %>%
   factor(c("control","Ifngr1","Tgfbr2"))
@@ -449,16 +654,32 @@ pdOrgan[["CD62Lneg"]] <- subset(pseudodata2, subset = CD62L_status == "CD62Lneg"
 
 # find variable features for each subset
 pdOrgan <- lapply(pdOrgan, function(x) FindVariableFeatures(x, nfeature = 2000))
+```
 
+    ## Finding variable features for layer counts
+
+    ## Finding variable features for layer counts
+    ## Finding variable features for layer counts
+    ## Finding variable features for layer counts
+    ## Finding variable features for layer counts
+
+``` r
 # create DESeq2 object
 ddsOrgan <- lapply(pdOrgan, function(x) DESeqDataSetFromMatrix(x@assays$SCT$counts,
                                                                colData = x@meta.data,
                                                                design = ~ feature_gene))
 ```
 
-First, we'll look at Ifngr1 KO DEGs
+    ## converting counts to integer mode
 
-```{r, fig.height=10, fig.width=10}
+    ## converting counts to integer mode
+    ## converting counts to integer mode
+    ## converting counts to integer mode
+    ## converting counts to integer mode
+
+First, we’ll look at Ifngr1 KO DEGs
+
+``` r
 # calculate DEGs for all conditions
 ifngr1DEG <- function(x){
   dds <- DESeq(x)
@@ -469,7 +690,89 @@ ifngr1DEG <- function(x){
 
 # create list of tibbles with DEG results
 resIfngr1 <- lapply(ddsOrgan, function(x) ifngr1DEG(x))
+```
 
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+``` r
 # Combine the tibbles into a single data frame with an identifier
 combinedTib <- bind_rows(
   lapply(seq_along(resIfngr1), function(i) {
@@ -509,7 +812,9 @@ ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, color = s
   )
 ```
 
-```{r fig.height=5,fig.width=10}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
+
+``` r
 # Separate the first tibble for comparison
 referenceTib <- combinedTib %>% filter(tibble_id == "spleen")
 comparisonTib <- combinedTib %>% filter(tibble_id == "mLN")
@@ -573,7 +878,9 @@ p2 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, col
 grid.arrange(p1,p2, ncol=2)
 ```
 
-```{r, fig.height=10, fig.width=10}
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
+
+``` r
 # calculate DEGs for all conditions
 tgfbr2DEG <- function(x){
   dds <- DESeq(x)
@@ -584,7 +891,89 @@ tgfbr2DEG <- function(x){
 
 # create list of tibbles with DEG results
 resTgfbr2 <- lapply(ddsOrgan, function(x) tgfbr2DEG(x))
+```
 
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+    ## estimating size factors
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ## final dispersion estimates
+
+    ## fitting model and testing
+
+    ## using 'ashr' for LFC shrinkage. If used in published research, please cite:
+    ##     Stephens, M. (2016) False discovery rates: a new deal. Biostatistics, 18:2.
+    ##     https://doi.org/10.1093/biostatistics/kxw041
+
+``` r
 # Combine the tibbles into a single data frame with an identifier
 combinedTib <- bind_rows(
   lapply(seq_along(resTgfbr2), function(i) {
@@ -624,7 +1013,12 @@ ggplot(comparisonTib2, aes(x = log2FoldChange_ref, y = log2FoldChange, color = s
   )
 ```
 
-```{r fig.height=5,fig.width=10}
+    ## Warning: Removed 18 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+
+``` r
 # Separate the first tibble for comparison
 referenceTib <- combinedTib %>% filter(tibble_id == "spleen")
 comparisonTib <- combinedTib %>% filter(tibble_id == "mLN")
@@ -687,3 +1081,11 @@ p2 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, col
 
 grid.arrange(p1,p2, ncol=2)
 ```
+
+    ## Warning: Removed 4 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+    ## Warning: Removed 5 rows containing missing values or values outside the scale range
+    ## (`geom_point()`).
+
+![](pseudobulk_TCRclone_sgRNA_GEX_CTR02_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->

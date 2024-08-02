@@ -3,6 +3,9 @@ title: "Downsampling analysis cell CTR02"
 author: "Eric Y. Wang"
 date: "`r Sys.Date()`"
 output:
+  github_document:
+    toc: true
+    html_preview: true
   html_notebook:
     toc: yes
     toc_float: yes
@@ -20,9 +23,11 @@ library(viridis)
 library(corrplot)
 library(ggcorrplot)
 knitr::opts_chunk$set(echo = TRUE)
+```
 
-source("../functions/scRNA_seq_analysis_functions.R")
-source("../functions/plotting_fxns.R")
+```{r}
+source("functions/scRNA_seq_analysis_functions.R")
+source("functions/plotting_fxns.R")
 theme_set(theme_Publication())
 ```
 
@@ -33,7 +38,7 @@ Here, I will assess the effects of decreasing numbers of cells on perturb-seq ch
 ## [Data Import]{.underline}
 
 ```{r}
-data <- readRDS("processing/CTR02_seurat_SCT_CRISPRumi9.rds")
+data <- readRDS("C:/Users/Eric/My Drive/Lab/datasets/EYW/CTR02_10x_240516/processing/CTR02_seurat_SCT_CRISPRumi9.rds")
 ```
 
 Add some metadata columns
