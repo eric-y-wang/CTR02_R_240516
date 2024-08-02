@@ -3,12 +3,12 @@ title: "Downsampling analysis cell CTR02"
 author: "Eric Y. Wang"
 date: "`r Sys.Date()`"
 output:
-  github_document:
-    toc: true
-    html_preview: true
   html_notebook:
     toc: yes
     toc_float: yes
+  github_document:
+    toc: true
+    html_preview: true
 ---
 
 ```{r setup, include=FALSE}
