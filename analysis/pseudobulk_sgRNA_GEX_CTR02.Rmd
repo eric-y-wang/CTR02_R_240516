@@ -707,7 +707,7 @@ p1 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, col
   xlim(-3,3) +
   ylim(-3,3) +
   labs(
-    title = "Ifngr1 KO spleen vs mLN",
+    title = "Tgfbr2 KO spleen vs mLN",
     x = "log2FC spleen",
     y = "log2FC mLN"
   )
@@ -739,7 +739,7 @@ p2 <- ggplot(comparisonTib1, aes(x = log2FoldChange_ref, y = log2FoldChange, col
   xlim(-3,3) +
   ylim(-3,3) +
   labs(
-    title = "Ifngr1 KO CD62L+ vs CD62L-",
+    title = "Tgfbr2 KO CD62L+ vs CD62L-",
     x = "log2FC CD62L+",
     y = "log2FC CD62L-"
   )

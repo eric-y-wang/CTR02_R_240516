@@ -251,6 +251,15 @@ regulonActivity_byCellTypeTidy %>%
     ylim(0,0.1)
 ```
 
+```{r}
+regulonActivity_byCellTypeTidy %>%
+  filter(regulons %in% c("Stat6(+)")) %>%
+  ggplot(aes(x = regulons, y = AUC, fill = feature_gene)) +
+    stat_summary(fun="mean", geom="bar", position = "dodge") +
+    geom_point(position = position_dodge(width = .9)) +
+    scale_fill_brewer(palette = "Dark2") +
+    scale_y_continuous(expand = c(0,0))
+```
 
 
 
